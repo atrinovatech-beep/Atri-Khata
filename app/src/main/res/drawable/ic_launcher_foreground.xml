@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer shield / polygon background -->
+    <path
+        android:fillColor="#182A24"
+        android:pathData="M54,26 L78,38 L78,66 L54,82 L30,66 L30,38 Z" />
+
+    <!-- Accent Border -->
+    <path
+        android:strokeColor="#26D07C"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M54,26 L78,38 L78,66 L54,82 L30,66 L30,38 Z" />
+
+    <!-- Stylized 'A' + Financial Ascending Bar Charts inside -->
+    <path
+        android:pathData="M54,34 L40,64 L47,64 L50,57 L58,57 L61,64 L68,64 Z M54,44 L56.5,51 L51.5,51 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="40"
+                android:startY="34"
+                android:endX="68"
+                android:endY="64"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="1.0" android:color="#E0F2FE" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Upward Growth Sparkle / Arrow in Emerald Teal -->
+    <path
+        android:fillColor="#26D07C"
+        android:pathData="M51,55 L57,55 L57,58 L51,58 Z" />
+
+    <!-- Dynamic accent dot / coin -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M66,33 A4,4 0 1,0 66,41 A4,4 0 1,0 66,33" />
+</vector>
