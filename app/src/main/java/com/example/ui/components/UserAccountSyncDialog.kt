@@ -145,6 +145,53 @@ fun UserAccountSyncSheet(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // Banner to Firebase Cloud Storage Vault
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF0F2342))
+                .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                .clickable {
+                    onClose()
+                    viewModel.openDialog(com.example.ui.ActiveDialog.FIREBASE_CLOUD_BACKUP)
+                }
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .testTag("open_firebase_vault_from_sync_dialog_banner")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
+                        contentDescription = null,
+                        tint = Color(0xFF38BDF8),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Firebase Cloud Storage Vault",
+                            color = TextWhite,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Backup & restore double-entry ledger & configurations",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Text("Open", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
         // Card 1: User Identity Card
         Card(
             colors = CardDefaults.cardColors(containerColor = CardDark),

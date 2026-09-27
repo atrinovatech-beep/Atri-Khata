@@ -94,9 +94,10 @@ class CloudSyncEngine(private val context: Context) {
             val inventory = database.inventoryDao().getAllItemsSync()
             val staff = database.staffDao().getAllStaffSync()
             val invoices = database.salesInvoiceDao().getAllInvoicesSync()
+            val ledgerEntries = database.ledgerDao().getAllEntriesSync()
 
             val rootJson = JSONObject().apply {
-                put("version", 6)
+                put("version", 7)
                 put("userId", userId)
                 put("userEmail", userEmail)
                 put("timestamp", System.currentTimeMillis())
@@ -185,12 +186,37 @@ class CloudSyncEngine(private val context: Context) {
                     })
                 }
                 put("staff", staffArray)
+
+                // Ledger Entries (Double-Entry GL)
+                val ledgerArray = JSONArray()
+                ledgerEntries.forEach { le ->
+                    ledgerArray.put(JSONObject().apply {
+                        put("postingDateMillis", le.postingDateMillis)
+                        put("postingDateBS", le.postingDateBS)
+                        put("postingDateAD", le.postingDateAD)
+                        put("account", le.account)
+                        put("accountType", le.accountType)
+                        put("partyType", le.partyType ?: "")
+                        put("partyId", le.partyId ?: -1L)
+                        put("partyName", le.partyName ?: "")
+                        put("voucherType", le.voucherType)
+                        put("voucherNo", le.voucherNo)
+                        put("debit", le.debit)
+                        put("credit", le.credit)
+                        put("netAmount", le.netAmount)
+                        put("againstAccount", le.againstAccount)
+                        put("currency", le.currency)
+                        put("fiscalYear", le.fiscalYear)
+                        put("remarks", le.remarks)
+                    })
+                }
+                put("ledgerEntries", ledgerArray)
             }
 
             val file = getUserVaultFile(userId)
             file.writeText(rootJson.toString(2))
 
-            val totalCount = parties.size + transactions.size + inventory.size + staff.size
+            val totalCount = parties.size + transactions.size + inventory.size + staff.size + ledgerEntries.size
             SyncResult(
                 isSuccess = true,
                 message = "Cloud backup completed. $totalCount records synchronized.",
@@ -362,6 +388,41 @@ class CloudSyncEngine(private val context: Context) {
                         )
                         restoredCount++
                     }
+                }
+            }
+
+            // 6. Ledger Entries (Double-Entry GL)
+            val ledgerArray = root.optJSONArray("ledgerEntries")
+            if (ledgerArray != null && ledgerArray.length() > 0) {
+                val newEntries = mutableListOf<com.example.data.local.entity.LedgerEntry>()
+                for (i in 0 until ledgerArray.length()) {
+                    val lObj = ledgerArray.getJSONObject(i)
+                    newEntries.add(
+                        com.example.data.local.entity.LedgerEntry(
+                            id = 0,
+                            postingDateMillis = lObj.optLong("postingDateMillis", System.currentTimeMillis()),
+                            postingDateBS = lObj.optString("postingDateBS", ""),
+                            postingDateAD = lObj.optString("postingDateAD", ""),
+                            account = lObj.optString("account", "General Ledger"),
+                            accountType = lObj.optString("accountType", "Asset"),
+                            partyType = lObj.optString("partyType", null).takeIf { it?.isNotBlank() == true },
+                            partyId = lObj.optLong("partyId", -1L).takeIf { it > 0 },
+                            partyName = lObj.optString("partyName", null).takeIf { it?.isNotBlank() == true },
+                            voucherType = lObj.optString("voucherType", "Journal Entry"),
+                            voucherNo = lObj.optString("voucherNo", "GL-${i + 1}"),
+                            debit = lObj.optDouble("debit", 0.0),
+                            credit = lObj.optDouble("credit", 0.0),
+                            againstAccount = lObj.optString("againstAccount", ""),
+                            currency = lObj.optString("currency", "Rs."),
+                            fiscalYear = lObj.optString("fiscalYear", ""),
+                            remarks = lObj.optString("remarks", "")
+                        )
+                    )
+                }
+                if (newEntries.isNotEmpty()) {
+                    database.ledgerDao().deleteAllEntries()
+                    database.ledgerDao().insertAll(newEntries)
+                    restoredCount += newEntries.size
                 }
             }
 

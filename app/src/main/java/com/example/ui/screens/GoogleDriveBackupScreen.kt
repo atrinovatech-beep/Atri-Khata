@@ -159,6 +159,53 @@ fun GoogleDriveBackupSheet(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // Quick Jump to Firebase Cloud Storage Vault
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(SkyBlueCardBg)
+                .border(1.dp, SkyBlueBright.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                .clickable {
+                    onClose()
+                    viewModel.openDialog(com.example.ui.ActiveDialog.FIREBASE_CLOUD_BACKUP)
+                }
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .testTag("open_firebase_vault_from_gdrive_banner")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
+                        contentDescription = null,
+                        tint = SkyBlueBright,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Firebase Cloud Storage Vault",
+                            color = TextWhite,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Backup & restore double-entry ledger & configurations",
+                            color = TextSubtle,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Text("Open", color = SkyBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
         // Card 1: Google Account Connection Status Card (OAuth integration)
         Card(
             colors = CardDefaults.cardColors(containerColor = CardDark),

@@ -5,22 +5,27 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.local.dao.AccountBalanceDao
 import com.example.data.local.dao.BusinessProfileDao
 import com.example.data.local.dao.InventoryDao
+import com.example.data.local.dao.LedgerDao
 import com.example.data.local.dao.PartyDao
 import com.example.data.local.dao.SalesInvoiceDao
 import com.example.data.local.dao.StaffDao
 import com.example.data.local.dao.TransactionDao
+import com.example.data.local.entity.AccountBalanceEntity
 import com.example.data.local.entity.BusinessProfileEntity
 import com.example.data.local.entity.InventoryItemEntity
 import com.example.data.local.entity.InvoiceActivityEntity
 import com.example.data.local.entity.InvoiceAttachmentEntity
+import com.example.data.local.entity.LedgerEntry
 import com.example.data.local.entity.PartyEntity
 import com.example.data.local.entity.PaymentAllocationEntity
 import com.example.data.local.entity.SalesInvoiceEntity
 import com.example.data.local.entity.SalesInvoiceItemEntity
 import com.example.data.local.entity.StaffMemberEntity
 import com.example.data.local.entity.TransactionEntity
+import com.example.data.repository.AccountBalanceRepository
 import androidx.room.migration.Migration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,9 +42,11 @@ import kotlinx.coroutines.launch
         SalesInvoiceItemEntity::class,
         PaymentAllocationEntity::class,
         InvoiceActivityEntity::class,
-        InvoiceAttachmentEntity::class
+        InvoiceAttachmentEntity::class,
+        LedgerEntry::class,
+        AccountBalanceEntity::class
     ],
-    version = 7,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,6 +56,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun staffDao(): StaffDao
     abstract fun salesInvoiceDao(): SalesInvoiceDao
     abstract fun businessProfileDao(): BusinessProfileDao
+    abstract fun ledgerDao(): LedgerDao
+    abstract fun accountBalanceDao(): AccountBalanceDao
 
     companion object {
         @Volatile
@@ -243,6 +252,94 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `ledger_entries` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `postingDateMillis` INTEGER NOT NULL,
+                        `postingDateBS` TEXT NOT NULL,
+                        `postingDateAD` TEXT NOT NULL,
+                        `account` TEXT NOT NULL,
+                        `accountType` TEXT NOT NULL,
+                        `partyType` TEXT,
+                        `partyId` INTEGER,
+                        `partyName` TEXT,
+                        `voucherType` TEXT NOT NULL,
+                        `voucherNo` TEXT NOT NULL,
+                        `debit` REAL NOT NULL,
+                        `credit` REAL NOT NULL,
+                        `netAmount` REAL NOT NULL,
+                        `againstAccount` TEXT NOT NULL,
+                        `currency` TEXT NOT NULL,
+                        `fiscalYear` TEXT NOT NULL,
+                        `remarks` TEXT NOT NULL,
+                        `isCancelled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_voucherNo` ON `ledger_entries` (`voucherNo`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_voucherType` ON `ledger_entries` (`voucherType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_account` ON `ledger_entries` (`account`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_partyId` ON `ledger_entries` (`partyId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_postingDateMillis` ON `ledger_entries` (`postingDateMillis`)")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Transaction table indices & accounting fields
+                try {
+                    db.execSQL("ALTER TABLE `transactions` ADD COLUMN `account` TEXT NOT NULL DEFAULT 'Cash in Hand'")
+                } catch (e: Exception) { /* already exists */ }
+                try {
+                    db.execSQL("ALTER TABLE `transactions` ADD COLUMN `category` TEXT NOT NULL DEFAULT 'General'")
+                } catch (e: Exception) { /* already exists */ }
+                try {
+                    db.execSQL("ALTER TABLE `transactions` ADD COLUMN `referenceNumber` TEXT NOT NULL DEFAULT ''")
+                } catch (e: Exception) { /* already exists */ }
+                try {
+                    db.execSQL("ALTER TABLE `transactions` ADD COLUMN `taxAmount` REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) { /* already exists */ }
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_partyId` ON `transactions` (`partyId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_dateMillis` ON `transactions` (`dateMillis`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_type` ON `transactions` (`type`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_invoiceNumber` ON `transactions` (`invoiceNumber`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_salesInvoiceId` ON `transactions` (`salesInvoiceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_account` ON `transactions` (`account`)")
+
+                // 2. Ledger entries additional indices
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_fiscalYear` ON `ledger_entries` (`fiscalYear`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ledger_entries_isCancelled` ON `ledger_entries` (`isCancelled`)")
+
+                // 3. Account Balances / Chart of Accounts table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `account_balances` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `accountCode` TEXT NOT NULL,
+                        `accountName` TEXT NOT NULL,
+                        `accountType` TEXT NOT NULL,
+                        `rootType` TEXT NOT NULL,
+                        `parentAccount` TEXT,
+                        `currency` TEXT NOT NULL DEFAULT 'Rs.',
+                        `openingBalance` REAL NOT NULL DEFAULT 0.0,
+                        `totalDebit` REAL NOT NULL DEFAULT 0.0,
+                        `totalCredit` REAL NOT NULL DEFAULT 0.0,
+                        `currentBalance` REAL NOT NULL DEFAULT 0.0,
+                        `isGroup` INTEGER NOT NULL DEFAULT 0,
+                        `isActive` INTEGER NOT NULL DEFAULT 1,
+                        `description` TEXT NOT NULL DEFAULT '',
+                        `lastUpdatedMillis` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_account_balances_accountName` ON `account_balances` (`accountName`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_account_balances_accountCode` ON `account_balances` (`accountCode`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_account_balances_accountType` ON `account_balances` (`accountType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_account_balances_isActive` ON `account_balances` (`isActive`)")
+            }
+        }
+
         fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -250,7 +347,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "atri_nova_business.db"
                 )
-                .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .fallbackToDestructiveMigration()
                 .addCallback(AppDatabaseCallback(scope))
                 .build()
@@ -305,6 +402,13 @@ abstract class AppDatabase : RoomDatabase() {
                     bankBranch = null
                 )
                 businessProfileDao.insertProfile(profile)
+            }
+
+            // Seed default Chart of Accounts for standard double-entry accounting & balances
+            try {
+                AccountBalanceRepository.seedDefaultAccounts(database.accountBalanceDao())
+            } catch (e: Exception) {
+                // Ignore if already seeded
             }
 
             // Cleanup any previously seeded demo data so the app starts fresh and clean

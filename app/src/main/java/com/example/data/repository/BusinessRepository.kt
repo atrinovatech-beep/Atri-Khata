@@ -69,6 +69,21 @@ class BusinessRepository(
     suspend fun insertTransaction(transaction: TransactionEntity): Long =
         transactionDao.insertTransaction(transaction)
 
+    suspend fun insertTransactions(transactions: List<TransactionEntity>): List<Long> =
+        transactionDao.insertTransactions(transactions)
+
+    fun getTransactionById(id: Long): Flow<TransactionEntity?> =
+        transactionDao.getTransactionById(id)
+
+    fun getTransactionsPaged(limit: Int, offset: Int): Flow<List<TransactionEntity>> =
+        transactionDao.getTransactionsPaged(limit, offset)
+
+    fun getTransactionsByAccount(account: String): Flow<List<TransactionEntity>> =
+        transactionDao.getTransactionsByAccount(account)
+
+    fun getTransactionsByDateRange(startDateMillis: Long, endDateMillis: Long): Flow<List<TransactionEntity>> =
+        transactionDao.getTransactionsByDateRange(startDateMillis, endDateMillis)
+
     suspend fun deleteTransaction(transaction: TransactionEntity) =
         transactionDao.deleteTransaction(transaction)
 

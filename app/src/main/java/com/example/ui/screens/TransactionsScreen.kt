@@ -937,18 +937,18 @@ fun TransactionsScreen(
                     }
                 }
 
-                // Quick Add Center Button
+                // Quick Add Center Button (Financial Transaction Debit/Credit)
                 Box(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF1D4ED8))
-                        .clickable { viewModel.openDialog(ActiveDialog.QUICK_ENTRY) }
+                        .clickable { viewModel.openDialog(ActiveDialog.ADD_TRANSACTION) }
                         .shadow(elevation = 8.dp, shape = CircleShape)
                         .testTag("btn_quick_entry"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Quick Add", tint = Color.White, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.Add, contentDescription = "Add Transaction", tint = Color.White, modifier = Modifier.size(24.dp))
                 }
 
                 // New Sale Pill

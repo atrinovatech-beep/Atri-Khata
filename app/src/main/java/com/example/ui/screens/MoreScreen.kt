@@ -25,10 +25,13 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Event
@@ -48,6 +51,7 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.StarRate
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.Subscriptions
+import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -252,6 +256,17 @@ fun MoreScreen(
                         hasNewBadge = true,
                         onClick = { Toast.makeText(context, "Opening Business Daily Notebook...", Toast.LENGTH_SHORT).show() }
                     )
+
+                    HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ModernMoreRow(
+                        icon = Icons.Outlined.CalendarMonth,
+                        title = "Date Converter (BS ⇄ AD)",
+                        subtitle = "Instant Nepali Bikram Sambat & Gregorian date converter",
+                        hasNewBadge = true,
+                        onClick = { viewModel.openDialog(ActiveDialog.DATE_CONVERTER) },
+                        testTag = "more_date_converter_row"
+                    )
                 }
             }
         }
@@ -323,9 +338,31 @@ fun MoreScreen(
                     HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
 
                     ModernMoreRow(
+                        icon = Icons.Outlined.UploadFile,
+                        title = "Bulk Import",
+                        subtitle = "Upload Parties & Items from Excel / CSV",
+                        hasNewBadge = true,
+                        onClick = { viewModel.openDialog(ActiveDialog.BULK_IMPORT) },
+                        testTag = "more_bulk_import_row"
+                    )
+
+                    HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ModernMoreRow(
                         icon = Icons.Outlined.ReceiptLong,
                         title = "Reports & Analytics",
                         onClick = { viewModel.openDialog(ActiveDialog.VIEW_REPORTS) }
+                    )
+
+                    HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ModernMoreRow(
+                        icon = Icons.Outlined.BarChart,
+                        title = "Ledger Analytics & Financial Health",
+                        subtitle = "Recharts account balances over time & GL health",
+                        hasNewBadge = true,
+                        onClick = { viewModel.openDialog(ActiveDialog.LEDGER_DASHBOARD) },
+                        testTag = "more_ledger_analytics_row"
                     )
 
                     HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
@@ -415,6 +452,17 @@ fun MoreScreen(
                         title = "App PIN & Security",
                         subtitle = "Configure 4-digit PIN & Biometrics",
                         onClick = { viewModel.openDialog(ActiveDialog.SETTINGS) }
+                    )
+
+                    HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ModernMoreRow(
+                        icon = Icons.Outlined.CloudUpload,
+                        title = "Firebase Cloud Storage Vault",
+                        subtitle = "Export & restore Ledger & configurations with SHA-256 integrity",
+                        hasNewBadge = true,
+                        onClick = { viewModel.openDialog(ActiveDialog.FIREBASE_CLOUD_BACKUP) },
+                        testTag = "more_firebase_backup_row"
                     )
 
                     HorizontalDivider(color = CardBorder.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = 16.dp))

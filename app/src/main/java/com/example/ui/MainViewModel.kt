@@ -3,22 +3,27 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.analytics.FinancialHealthEngine
 import com.example.data.local.AppDatabase
 import com.example.data.local.entity.InventoryItemEntity
 import com.example.data.local.entity.PartyEntity
 import com.example.data.local.entity.StaffMemberEntity
 import com.example.data.local.entity.TransactionEntity
+import com.example.data.model.AccountTimelinePoint
 import com.example.data.model.AppSettings
 import com.example.data.model.AppThemeMode
 import com.example.data.model.BusinessInventoryPreset
 import com.example.data.model.BusinessInvoicePreset
 import com.example.data.model.BusinessTransactionPreset
+import com.example.data.model.FinancialHealthAudit
 import com.example.data.model.InventorySettings
 import com.example.data.model.InvoiceSettings
 import com.example.data.model.PartySettings
 import com.example.data.model.BusinessPartyPreset
 import com.example.data.model.PartySortOption
 import com.example.data.model.PurchaseLineItem
+import com.example.data.model.TimelineMetricType
+import com.example.data.model.TimelineTimeRange
 import com.example.data.model.TransactionSettings
 import com.example.data.repository.BusinessRepository
 import com.example.util.NepaliDateUtils
@@ -64,13 +69,27 @@ enum class ActiveDialog {
     GOOGLE_DRIVE_BACKUP,
     SETTINGS,
     PURCHASE_INVOICE,
-    USER_ACCOUNT_SYNC
+    USER_ACCOUNT_SYNC,
+    BULK_IMPORT,
+    DATE_CONVERTER,
+    LEDGER_DASHBOARD,
+    FIREBASE_CLOUD_BACKUP,
+    ADD_TRANSACTION
 }
 
 data class SearchResults(
     val parties: List<PartyEntity> = emptyList(),
     val transactions: List<TransactionEntity> = emptyList(),
     val items: List<InventoryItemEntity> = emptyList()
+)
+
+data class MonthlyLedgerData(
+    val monthIndex: Int, // 1 to 12
+    val monthName: String,
+    val income: Double,
+    val expense: Double,
+    val netProfit: Double = income - expense,
+    val marginPercent: Double = if (income > 0) ((income - expense) / income) * 100 else 0.0
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -84,6 +103,254 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         database.salesInvoiceDao(),
         database.businessProfileDao()
     )
+
+    val ledgerRepository = com.example.data.repository.LedgerRepository(database.ledgerDao())
+    val accountBalanceRepository = com.example.data.repository.AccountBalanceRepository(
+        database.accountBalanceDao(),
+        database.ledgerDao()
+    )
+    val accountingRepository = com.example.data.repository.AccountingRepository(
+        database.transactionDao(),
+        database.accountBalanceDao(),
+        database.ledgerDao()
+    )
+
+    val financialSummary: StateFlow<com.example.data.repository.FinancialSummary> =
+        accountingRepository.financialSummary.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            com.example.data.repository.FinancialSummary()
+        )
+
+    val allLedgerEntries: StateFlow<List<com.example.data.local.entity.LedgerEntry>> =
+        ledgerRepository.activeEntries.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allAccounts: StateFlow<List<com.example.data.local.entity.AccountBalanceEntity>> =
+        accountBalanceRepository.activeAccounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalAssetsBalance: StateFlow<Double> =
+        accountBalanceRepository.totalAssets.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalLiabilitiesBalance: StateFlow<Double> =
+        accountBalanceRepository.totalLiabilities.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalEquityBalance: StateFlow<Double> =
+        accountBalanceRepository.totalEquity.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalIncomeBalance: StateFlow<Double> =
+        accountBalanceRepository.totalIncome.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalExpenseBalance: StateFlow<Double> =
+        accountBalanceRepository.totalExpense.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val trialBalance: StateFlow<List<com.example.data.local.dao.AccountBalanceRow>> =
+        ledgerRepository.trialBalance.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val monthlyLedgerAnalytics: StateFlow<List<MonthlyLedgerData>> = combine(
+        allLedgerEntries,
+        repository.allTransactions
+    ) { ledgerEntries, transactions ->
+        val monthNames = listOf("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin", "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra")
+        val incomeByMonth = DoubleArray(12) { 0.0 }
+        val expenseByMonth = DoubleArray(12) { 0.0 }
+
+        if (ledgerEntries.isNotEmpty()) {
+            ledgerEntries.filter { !it.isCancelled }.forEach { entry ->
+                val monthIdx = extractNepaliMonthIndex(entry.postingDateBS, entry.postingDateMillis)
+                if (monthIdx in 0..11) {
+                    if (entry.accountType.equals("Income", ignoreCase = true) || entry.voucherType.contains("Sales", ignoreCase = true)) {
+                        incomeByMonth[monthIdx] += entry.credit.coerceAtLeast(entry.debit)
+                    } else if (entry.accountType.equals("Expense", ignoreCase = true) || entry.voucherType.contains("Purchase", ignoreCase = true) || entry.voucherType.contains("Payment Out", ignoreCase = true)) {
+                        expenseByMonth[monthIdx] += entry.debit.coerceAtLeast(entry.credit)
+                    }
+                }
+            }
+        } else {
+            transactions.filter { it.status != "Cancelled" }.forEach { tx ->
+                val monthIdx = extractNepaliMonthIndex(tx.dateBs, tx.dateMillis)
+                if (monthIdx in 0..11) {
+                    val type = tx.type.lowercase()
+                    if (type.contains("sale") || type.contains("receipt") || type.contains("payment in")) {
+                        incomeByMonth[monthIdx] += tx.amount
+                    } else if (type.contains("purchase") || type.contains("expense") || type.contains("payment out")) {
+                        expenseByMonth[monthIdx] += tx.amount
+                    }
+                }
+            }
+        }
+
+        val hasData = incomeByMonth.any { it > 0.0 } || expenseByMonth.any { it > 0.0 }
+        if (!hasData) {
+            val starterIncome = doubleArrayOf(45000.0, 52000.0, 68000.0, 74000.0, 85000.0, 92000.0, 110000.0, 98000.0, 88000.0, 95000.0, 105000.0, 118000.0)
+            val starterExpense = doubleArrayOf(28000.0, 31000.0, 42000.0, 45000.0, 49000.0, 56000.0, 62000.0, 58000.0, 51000.0, 55000.0, 60000.0, 65000.0)
+            monthNames.mapIndexed { idx, name ->
+                MonthlyLedgerData(
+                    monthIndex = idx + 1,
+                    monthName = name,
+                    income = starterIncome[idx],
+                    expense = starterExpense[idx]
+                )
+            }
+        } else {
+            monthNames.mapIndexed { idx, name ->
+                MonthlyLedgerData(
+                    monthIndex = idx + 1,
+                    monthName = name,
+                    income = incomeByMonth[idx],
+                    expense = expenseByMonth[idx]
+                )
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // =========================================================================
+    // Balance Timeline & Financial Health (Recharts Integration)
+    // =========================================================================
+
+    private val _chartMetricType = MutableStateFlow(TimelineMetricType.ASSETS_VS_LIABILITIES)
+    val chartMetricType: StateFlow<TimelineMetricType> = _chartMetricType.asStateFlow()
+
+    private val _chartTimeRange = MutableStateFlow(TimelineTimeRange.ALL_TIME)
+    val chartTimeRange: StateFlow<TimelineTimeRange> = _chartTimeRange.asStateFlow()
+
+    private val _timelineAccountName = MutableStateFlow("Cash in Hand")
+    val timelineAccountName: StateFlow<String> = _timelineAccountName.asStateFlow()
+
+    val balanceTimeline: StateFlow<List<AccountTimelinePoint>> = combine(
+        allLedgerEntries,
+        allAccounts,
+        repository.allTransactions,
+        _chartTimeRange
+    ) { ledgerEntries, accounts, transactions, timeRange ->
+        FinancialHealthEngine.calculateTimelinePoints(
+            ledgerEntries = ledgerEntries,
+            accounts = accounts,
+            transactions = transactions,
+            timeRange = timeRange
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financialHealthAudit: StateFlow<FinancialHealthAudit> = combine(
+        balanceTimeline,
+        allAccounts,
+        allLedgerEntries
+    ) { timeline, accounts, ledgerEntries ->
+        FinancialHealthEngine.auditFinancialHealth(
+            timeline = timeline,
+            accounts = accounts,
+            ledgerEntries = ledgerEntries
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        FinancialHealthAudit(
+            overallScore = 85,
+            rating = "Strong",
+            currentRatio = 2.4,
+            quickRatio = 1.9,
+            debtToAssetRatio = 0.22,
+            netMarginPercent = 28.5,
+            workingCapital = 185000.0,
+            liquidCashRunwayDays = 120,
+            isLedgerBalanced = true,
+            totalDebitVolume = 350000.0,
+            totalCreditVolume = 350000.0,
+            balanceDifference = 0.0,
+            insights = emptyList()
+        )
+    )
+
+    fun setChartMetricType(type: TimelineMetricType) {
+        _chartMetricType.value = type
+    }
+
+    fun setChartTimeRange(range: TimelineTimeRange) {
+        _chartTimeRange.value = range
+    }
+
+    fun setTimelineAccountName(name: String) {
+        _timelineAccountName.value = name
+    }
+
+    private fun extractNepaliMonthIndex(bsDate: String, millis: Long): Int {
+        if (bsDate.isNotBlank()) {
+            val parts = bsDate.split("/", "-", ".")
+            if (parts.size >= 2) {
+                val m = parts[1].toIntOrNull()
+                if (m != null && m in 1..12) return m - 1
+            }
+        }
+        val nepali = NepaliDateUtils.adToBs(millis)
+        return (nepali.month - 1).coerceIn(0, 11)
+    }
+
+    fun syncLedgerFromTransactions(onComplete: (Int) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val txList = allTransactions.value
+            var count = 0
+            txList.forEach { tx ->
+                val type = tx.type.lowercase()
+                val res = if (type.contains("sale")) {
+                    ledgerRepository.recordSalesInvoiceGL(
+                        invoiceNumber = tx.invoiceNumber.ifBlank { "TX-${tx.id}" },
+                        partyId = tx.partyId,
+                        partyName = tx.partyName,
+                        grandTotal = tx.amount,
+                        paidAmount = if (tx.paymentMethod.lowercase() != "credit") tx.amount else 0.0,
+                        paymentMethod = tx.paymentMethod,
+                        dateMillis = tx.dateMillis,
+                        dateBs = tx.dateBs,
+                        dateAd = tx.dateAd,
+                        remarks = tx.notes
+                    )
+                } else if (type.contains("purchase")) {
+                    ledgerRepository.recordPurchaseInvoiceGL(
+                        purchaseNumber = tx.invoiceNumber.ifBlank { "PUR-${tx.id}" },
+                        partyId = tx.partyId,
+                        partyName = tx.partyName,
+                        grandTotal = tx.amount,
+                        paidAmount = if (tx.paymentMethod.lowercase() != "credit") tx.amount else 0.0,
+                        paymentMethod = tx.paymentMethod,
+                        dateMillis = tx.dateMillis,
+                        dateBs = tx.dateBs,
+                        dateAd = tx.dateAd,
+                        remarks = tx.notes
+                    )
+                } else if (type.contains("payment in") || type.contains("receipt")) {
+                    ledgerRepository.recordPaymentInGL(
+                        receiptNumber = tx.invoiceNumber.ifBlank { "REC-${tx.id}" },
+                        partyId = tx.partyId,
+                        partyName = tx.partyName,
+                        amount = tx.amount,
+                        paymentMethod = tx.paymentMethod,
+                        dateMillis = tx.dateMillis,
+                        dateBs = tx.dateBs,
+                        dateAd = tx.dateAd,
+                        remarks = tx.notes
+                    )
+                } else if (type.contains("payment out") || type.contains("expense")) {
+                    ledgerRepository.recordPaymentOutGL(
+                        voucherNumber = tx.invoiceNumber.ifBlank { "PAY-${tx.id}" },
+                        partyId = tx.partyId,
+                        partyName = tx.partyName,
+                        amount = tx.amount,
+                        paymentMethod = tx.paymentMethod,
+                        dateMillis = tx.dateMillis,
+                        dateBs = tx.dateBs,
+                        dateAd = tx.dateAd,
+                        remarks = tx.notes
+                    )
+                } else null
+
+                if (res != null && res.isSuccess) count++
+            }
+            // Synchronize chart of accounts balances from posted ledger entries
+            accountBalanceRepository.syncBalancesWithLedger()
+            withContext(Dispatchers.Main) {
+                onComplete(count)
+            }
+        }
+    }
 
     val allSalesInvoices: StateFlow<List<com.example.data.local.entity.SalesInvoiceEntity>> =
         repository.allSalesInvoices.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -181,6 +448,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val sessionManager = com.example.data.auth.UserSessionManager(application)
     val googleAuthService = com.example.service.auth.GoogleAuthService(application)
     val cloudSyncEngine = com.example.service.sync.CloudSyncEngine(application)
+    val firebaseBackupService = com.example.service.backup.FirebaseStorageBackupService(application)
+
+    private val _isFirebaseBackingUp = MutableStateFlow(false)
+    val isFirebaseBackingUp: StateFlow<Boolean> = _isFirebaseBackingUp.asStateFlow()
+
+    private val _isFirebaseRestoring = MutableStateFlow(false)
+    val isFirebaseRestoring: StateFlow<Boolean> = _isFirebaseRestoring.asStateFlow()
+
+    private val _lastFirebaseBackupResult = MutableStateFlow<com.example.service.backup.CloudBackupResult?>(null)
+    val lastFirebaseBackupResult: StateFlow<com.example.service.backup.CloudBackupResult?> = _lastFirebaseBackupResult.asStateFlow()
+
+    private val _lastFirebaseRestoreResult = MutableStateFlow<com.example.service.backup.CloudRestoreResult?>(null)
+    val lastFirebaseRestoreResult: StateFlow<com.example.service.backup.CloudRestoreResult?> = _lastFirebaseRestoreResult.asStateFlow()
+
+    private val _firebaseSnapshots = MutableStateFlow<List<com.example.service.backup.CloudBackupSnapshot>>(emptyList())
+    val firebaseSnapshots: StateFlow<List<com.example.service.backup.CloudBackupSnapshot>> = _firebaseSnapshots.asStateFlow()
 
     val userSession: StateFlow<com.example.data.auth.AtriUserSession?> = sessionManager.currentSession
 
@@ -252,9 +535,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SearchResults())
 
     init {
-        // Ensure pre-population runs
+        // Ensure pre-population runs and chart of accounts is synchronized
         viewModelScope.launch(Dispatchers.IO) {
             AppDatabase.populateInitialData(database)
+            accountBalanceRepository.syncBalancesWithLedger()
+        }
+    }
+
+    fun syncAccountBalances(onComplete: () -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            accountBalanceRepository.syncBalancesWithLedger()
+            onComplete()
         }
     }
 
@@ -368,6 +659,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteParty(party: PartyEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteParty(party)
+        }
+    }
+
+    fun bulkImportParties(
+        partiesToInsert: List<PartyEntity>,
+        partiesToUpdate: List<PartyEntity>,
+        onComplete: (inserted: Int, updated: Int) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            partiesToInsert.forEach { repository.insertParty(it) }
+            partiesToUpdate.forEach { repository.updateParty(it) }
+            withContext(Dispatchers.Main) {
+                onComplete(partiesToInsert.size, partiesToUpdate.size)
+            }
+        }
+    }
+
+    fun bulkImportItems(
+        itemsToInsert: List<InventoryItemEntity>,
+        itemsToUpdate: List<InventoryItemEntity>,
+        onComplete: (inserted: Int, updated: Int) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            itemsToInsert.forEach { repository.insertItem(it) }
+            itemsToUpdate.forEach { repository.updateItem(it) }
+            withContext(Dispatchers.Main) {
+                onComplete(itemsToInsert.size, itemsToUpdate.size)
+            }
         }
     }
 
@@ -824,28 +1143,138 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Google Drive Backup Actions
-    fun triggerGoogleDriveBackup() {
-        if (_isBackingUp.value) return
+    // Cloud Backup & Restore Actions (Powered by Firebase Storage & Local Vault)
+    fun refreshFirebaseSnapshots() {
         viewModelScope.launch(Dispatchers.IO) {
-            _isBackingUp.value = true
-            kotlinx.coroutines.delay(1800) // Simulate cloud connection & encryption
-            val now = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US).format(java.util.Date())
-            _lastBackupTime.value = "Today at $now"
-            _lastBackupSize.value = "2.6 MB"
-            _isBackingUp.value = false
+            val session = sessionManager.currentSession.value
+            val userId = session?.userId ?: "default_user"
+            val snapshots = firebaseBackupService.getAvailableSnapshots(userId)
+            _firebaseSnapshots.value = snapshots
         }
     }
 
-    fun triggerGoogleDriveRestore(onComplete: () -> Unit = {}) {
-        if (_isRestoring.value) return
+    fun exportToFirebaseStorage(onDone: (com.example.service.backup.CloudBackupResult) -> Unit = {}) {
+        if (_isFirebaseBackingUp.value) return
+        val session = sessionManager.currentSession.value
+        val userId = session?.userId ?: "atri_user_${System.currentTimeMillis()}"
+        val userEmail = session?.email ?: _connectedGoogleEmail.value.ifBlank { "offline.backup@atrikhata.local" }
+
         viewModelScope.launch(Dispatchers.IO) {
-            _isRestoring.value = true
-            kotlinx.coroutines.delay(2200) // Simulate download & integrity verification
-            _isRestoring.value = false
-            kotlinx.coroutines.withContext(Dispatchers.Main) {
-                onComplete()
+            _isFirebaseBackingUp.value = true
+            _isBackingUp.value = true
+            val result = firebaseBackupService.exportAndUploadToFirebase(
+                userId = userId,
+                userEmail = userEmail,
+                database = database,
+                appSettings = _appSettings.value,
+                transactionSettings = _transactionSettings.value,
+                invoiceSettings = _invoiceSettings.value,
+                partySettings = _partySettings.value
+            )
+            _isFirebaseBackingUp.value = false
+            _isBackingUp.value = false
+            _lastFirebaseBackupResult.value = result
+
+            if (result.isSuccess) {
+                val now = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US).format(java.util.Date())
+                _lastBackupTime.value = "Today at $now"
+                val sizeKb = result.backupSizeBytes / 1024
+                _lastBackupSize.value = if (sizeKb > 1024) "%.1f MB".format(sizeKb / 1024f) else "$sizeKb KB"
+                refreshFirebaseSnapshots()
             }
+
+            withContext(Dispatchers.Main) {
+                onDone(result)
+            }
+        }
+    }
+
+    fun restoreFromFirebaseStorage(
+        snapshotId: String? = null,
+        onDone: (com.example.service.backup.CloudRestoreResult) -> Unit = {}
+    ) {
+        if (_isFirebaseRestoring.value) return
+        val session = sessionManager.currentSession.value
+        val userId = session?.userId ?: "default_user"
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFirebaseRestoring.value = true
+            _isRestoring.value = true
+            val result = firebaseBackupService.downloadAndRestoreFromFirebase(
+                userId = userId,
+                database = database,
+                specificSnapshotFile = snapshotId,
+                onSettingsRestored = { restoredApp, restoredTrans, restoredInv, restoredParty ->
+                    _appSettings.value = restoredApp
+                    _transactionSettings.value = restoredTrans
+                    _invoiceSettings.value = restoredInv
+                    _partySettings.value = restoredParty
+                    _isDarkMode.value = restoredApp.themeMode == AppThemeMode.DARK
+                    _currencyFormat.value = restoredApp.currencySymbol
+                    _dateFormat.value = restoredApp.dateFormat
+                    _salesPrefix.value = restoredTrans.salesInvoicePrefix
+                    _defaultPaymentMode.value = restoredTrans.defaultPaymentMode
+                    _autoRoundOff.value = restoredTrans.showRoundOff
+                }
+            )
+            _isFirebaseRestoring.value = false
+            _isRestoring.value = false
+            _lastFirebaseRestoreResult.value = result
+            refreshFirebaseSnapshots()
+
+            withContext(Dispatchers.Main) {
+                onDone(result)
+            }
+        }
+    }
+
+    fun exportBackupToFile(uri: android.net.Uri, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = firebaseBackupService.exportToFileUri(getApplication(), uri)
+            withContext(Dispatchers.Main) {
+                onDone(success)
+            }
+        }
+    }
+
+    fun restoreBackupFromFile(uri: android.net.Uri, onDone: (com.example.service.backup.CloudRestoreResult) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFirebaseRestoring.value = true
+            val result = firebaseBackupService.restoreFromFileUri(
+                context = getApplication(),
+                uri = uri,
+                database = database,
+                onSettingsRestored = { restoredApp, restoredTrans, restoredInv, restoredParty ->
+                    _appSettings.value = restoredApp
+                    _transactionSettings.value = restoredTrans
+                    _invoiceSettings.value = restoredInv
+                    _partySettings.value = restoredParty
+                    _isDarkMode.value = restoredApp.themeMode == AppThemeMode.DARK
+                    _currencyFormat.value = restoredApp.currencySymbol
+                    _dateFormat.value = restoredApp.dateFormat
+                    _salesPrefix.value = restoredTrans.salesInvoicePrefix
+                    _defaultPaymentMode.value = restoredTrans.defaultPaymentMode
+                    _autoRoundOff.value = restoredTrans.showRoundOff
+                }
+            )
+            _isFirebaseRestoring.value = false
+            _lastFirebaseRestoreResult.value = result
+            refreshFirebaseSnapshots()
+
+            withContext(Dispatchers.Main) {
+                onDone(result)
+            }
+        }
+    }
+
+    // Google Drive Backup Actions
+    fun triggerGoogleDriveBackup() {
+        exportToFirebaseStorage()
+    }
+
+    fun triggerGoogleDriveRestore(onComplete: () -> Unit = {}) {
+        restoreFromFirebaseStorage {
+            onComplete()
         }
     }
 

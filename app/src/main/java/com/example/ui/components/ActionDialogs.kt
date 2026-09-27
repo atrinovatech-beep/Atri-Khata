@@ -70,6 +70,7 @@ import com.example.data.local.entity.PartyEntity
 import com.example.ui.ActiveDialog
 import com.example.ui.MainViewModel
 import com.example.ui.screens.AdvancedStaffManagementSheet
+import com.example.ui.screens.BulkImportScreen
 import com.example.ui.screens.GoogleDriveBackupSheet
 import com.example.ui.screens.SettingsSheet
 import com.example.ui.theme.*
@@ -83,6 +84,72 @@ fun ActionDialogHost(
     inventoryItems: List<InventoryItemEntity>
 ) {
     if (activeDialog == ActiveDialog.NONE) return
+
+    if (activeDialog == ActiveDialog.BULK_IMPORT) {
+        androidx.activity.compose.BackHandler {
+            viewModel.closeDialog()
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AppTheme.colors.background
+        ) {
+            BulkImportScreen(
+                viewModel = viewModel,
+                onClose = { viewModel.closeDialog() }
+            )
+        }
+        return
+    }
+
+    if (activeDialog == ActiveDialog.LEDGER_DASHBOARD) {
+        androidx.activity.compose.BackHandler {
+            viewModel.closeDialog()
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AppTheme.colors.background
+        ) {
+            com.example.ui.screens.LedgerDashboardScreen(
+                viewModel = viewModel,
+                onBack = { viewModel.closeDialog() }
+            )
+        }
+        return
+    }
+
+    if (activeDialog == ActiveDialog.FIREBASE_CLOUD_BACKUP) {
+        androidx.activity.compose.BackHandler {
+            viewModel.closeDialog()
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AppTheme.colors.background
+        ) {
+            com.example.ui.screens.FirebaseCloudBackupScreen(
+                viewModel = viewModel,
+                onClose = { viewModel.closeDialog() }
+            )
+        }
+        return
+    }
+
+    if (activeDialog == ActiveDialog.ADD_TRANSACTION) {
+        androidx.activity.compose.BackHandler {
+            viewModel.closeDialog()
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AppTheme.colors.background
+        ) {
+            com.example.ui.screens.AddTransactionScreen(
+                onBack = { viewModel.closeDialog() },
+                onSaveSuccess = {
+                    viewModel.closeDialog()
+                }
+            )
+        }
+        return
+    }
 
     if (activeDialog == ActiveDialog.SALES_INVOICE) {
         androidx.activity.compose.BackHandler {
@@ -180,6 +247,22 @@ fun ActionDialogHost(
             )
 
             ActiveDialog.SALES_INVOICE -> {
+                // Handled above as full-screen surface
+            }
+
+            ActiveDialog.BULK_IMPORT -> {
+                // Handled above as full-screen surface
+            }
+
+            ActiveDialog.LEDGER_DASHBOARD -> {
+                // Handled above as full-screen surface
+            }
+
+            ActiveDialog.FIREBASE_CLOUD_BACKUP -> {
+                // Handled above as full-screen surface
+            }
+
+            ActiveDialog.ADD_TRANSACTION -> {
                 // Handled above as full-screen surface
             }
 
@@ -354,6 +437,10 @@ fun ActionDialogHost(
                     }
                 )
             }
+
+            ActiveDialog.DATE_CONVERTER -> DateConverterBottomSheet(
+                onDismiss = { viewModel.closeDialog() }
+            )
 
             ActiveDialog.NONE -> Unit
         }
